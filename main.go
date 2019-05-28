@@ -4,7 +4,6 @@ import (
 	"time"
 	"strings"
 	"log"
-	"errors"
 	"sync"
 	"os"
 	"os/exec"
@@ -19,7 +18,7 @@ const marker = "#### DOCKER HOSTS UPDATER ####"
 var (
 	path string
 	client *docker.Client
-	ips map[string]string
+	hosts []string
 	mutex sync.Mutex
 )
 
@@ -41,7 +40,7 @@ func main() {
 }
 
 func update() {
-	ips = make(map[string]string)
+	hosts = make([]string, 0)
 
 	containers, err := client.ListContainers(docker.ListContainersOptions{})
 	if err != nil {
@@ -100,50 +99,25 @@ func listen() {
 }
 
 func add(container *docker.Container) {
-	hosts, err := getHosts(container)
-	if err != nil {
+	containerHosts, err := getHosts(container)
+	if err != nil || 0 == len(containerHosts) {
 		return
 	}
 
-	ip, err := getIp(container)
-	if err != nil {
-		return
-	}
-
-	ips[ip] = hosts
-}
-
-func getIp(container *docker.Container) (string, error) {
-	ip := container.NetworkSettings.IPAddress;
-	if (0 < len(ip)) {
-		return ip, nil
-	}
-
-	for _, network := range container.NetworkSettings.Networks {
-		return network.IPAddress, nil
-	}
-
-	return "", errors.New("IP not found")
+	hosts = append(hosts, containerHosts)
 }
 
 func getHosts(container *docker.Container) (string, error) {
 	var hosts string
 
-	domainname := container.Config.Domainname
-	hostname := container.Config.Hostname
-
-	hosts = hostname
-	if 0 < len(domainname) {
-		hosts += "." + domainname
-	}
-
-	subdomains := container.Config.Labels["subdomains"]
-	if 0 < len(subdomains) {
-		basedomain := hosts
-
-		for _, host := range strings.Split(subdomains, " ") {
-			hosts += " " + host + "." + basedomain
+	rules := container.Config.Labels["traefik.frontend.rule"]
+	if 0 < len(rules) {
+		rules = rules[5:]
+		for _, host := range strings.Split(rules, ",") {
+			hosts += " " + host
 		}
+	} else {
+		hosts += " " + container.Name[1:] + ".docker"
 	}
 
 	return hosts, nil
@@ -177,8 +151,8 @@ func updateFile() {
 
 	lines = append(lines, marker)
 
-	for ip, host := range ips {
-		lines = append(lines, ip + " " + host)
+	for _, host := range hosts {
+		lines = append(lines, "127.0.0.1 " + host)
 	}
 
 	err = exec.Command("sh", "-c", "echo -e \"" + strings.Join(lines, "\\n") + "\" > " + path).Run()

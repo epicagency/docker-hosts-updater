@@ -6,14 +6,13 @@ ENV GOBIN=$GOPATH/bin\
 
 WORKDIR /usr/local/app
 
+RUN apk add --no-cache git gcc g++ make --virtual .build-deps
+
 COPY main.go main.go
 
-RUN apk add --no-cache git gcc g++ make --virtual .build-deps \
-    && go get \
+RUN go get \
     && go build main.go \
-    && cp main /usr/local/bin/grachev-dhu \
-    && apk del .build-deps \
-    && rm -rf * && rm -rf $GOPATH/*
+    && cp main /usr/local/bin/grachev-dhu
 
 FROM alpine:3.7
 
